@@ -32,6 +32,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 
 ### Events
 - `list-events` - List scheduled events (requires --user-uri)
+- `list-events-with-invitees` - List events with invitee details in a single API call
 - `get-event` - Get event details (requires --event-uuid)
 - `cancel-event` - Cancel an event (requires --event-uuid, optional --reason)
 
@@ -55,8 +56,9 @@ Get your Personal Access Token from: https://calendly.com/integrations/api_webho
 
 When user asks about:
 - "What meetings do I have?" → `list-events` with `--min-start-time` (use recent date!)
+- "Show me all demos this week with who booked them" → `list-events-with-invitees` (single call!)
 - "Cancel my 2pm meeting" → Find with `list-events` (time-filtered), then `cancel-event`
-- "Who's attending X meeting?" → `list-event-invitees`
+- "Who's attending X meeting?" → `list-events-with-invitees` or `list-event-invitees`
 
 **Note:** First time, run `calendly get-current-user` to obtain your User URI.
 
@@ -79,6 +81,11 @@ Run `calendly get-current-user` to get your user URI. Example:
 calendly list-events \
   --user-uri "<YOUR_USER_URI>" \
   -o json | jq .
+
+# List events with invitees in single API call (recommended for "who booked?")
+calendly list-events-with-invitees \
+  --user-uri "<YOUR_USER_URI>" \
+  --status active
 
 # Get event details
 calendly get-event \
@@ -128,12 +135,17 @@ MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calend
 
 The API returns events oldest-first by default and doesn't support pagination via CLI. Without a time filter, you'll get events from years ago.
 
+For getting invitees with events, use `list-events-with-invitees` for a single API call instead of multiple calls.
+
 ```bash
 # Last 7 days
 calendly list-events --user-uri "<URI>" --min-start-time "$(date -u -d '7 days ago' +%Y-%m-%dT00:00:00Z)"
 
-# This week
-calendly list-events --user-uri "<URI>" --min-start-time "2026-01-20T00:00:00Z" --max-start-time "2026-01-27T23:59:59Z"
+# This week with invitees (single call)
+calendly list-events-with-invitees \
+  --user-uri "<URI>" \
+  --min-start-time "2026-01-20T00:00:00Z" \
+  --max-start-time "2026-01-27T23:59:59Z"
 
 # Future events only
 calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -149,5 +161,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-01-21 (Portable CLI with npm v1.0.0; v2.0 scheduling features pending upstream publish)  
+**Updated:** 2026-02-03 (Added list-events-with-invitees for single-call invitee fetching)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
