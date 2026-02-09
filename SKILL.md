@@ -7,6 +7,8 @@ description: Calendly scheduling integration. List events, check availability, m
 
 Interact with Calendly scheduling via MCP-generated CLI.
 
+> Status: production path remains `calendly` (mcporter-based). Experimental OpenAPI lane exists at `generated/openapi/calendly_openapi.py` with compatibility wrapper `calendly-openapi-compat`, validated via `scripts/parity-check-openapi-vs-current.sh`.
+
 > **Note:** Scheduling API features (list-event-types, get-event-type-availability, schedule-event) will be available once calendly-mcp-server v2.0.0 is published to npm. Current CLI uses v1.0.0 for portability.
 
 ## Quick Start

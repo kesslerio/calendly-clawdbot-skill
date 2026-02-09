@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Compatibility wrapper around generated OpenAPI Calendly CLI.
+
+Purpose:
+- Preserve high-value legacy command names/flags.
+- Fill feature gaps not cleanly exposed in the generated OpenAPI CLI.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent
+OPENAPI_CLI = ROOT / "generated" / "openapi" / "calendly_openapi.py"
+LEGACY_CLI = ROOT / "calendly"
+
+
+def run_cmd(
+    cmd: list[str], timeout_ms: int = 30000, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout_ms / 1000, env=env)
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(f"Command timed out after {timeout_ms}ms\n")
+        raise SystemExit(124)
+
+
+def run_json(cmd: list[str], timeout_ms: int = 30000) -> dict[str, Any]:
+    cp = run_cmd(cmd, timeout_ms=timeout_ms)
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr or cp.stdout)
+        raise SystemExit(cp.returncode)
+    try:
+        return json.loads(cp.stdout)
+    except json.JSONDecodeError:
+        sys.stderr.write(cp.stdout)
+        raise SystemExit(1)
+
+
+def emit_output(payload: Any, output: str) -> None:
+    if output == "raw":
+        print(json.dumps(payload, separators=(",", ":")))
+    else:
+        print(json.dumps(payload, indent=2))
+
+
+def auth_flags(args: argparse.Namespace) -> list[str]:
+    # Calendly PATs are bearer tokens in practice. Keep CALENDLY_API_KEY compatibility
+    # by forwarding it as --token to generated OpenAPI CLI.
+    compat_api_key = args.api_key or os.environ.get("CALENDLY_API_KEY")
+    token = args.token or os.environ.get("CALENDLY_TOKEN") or os.environ.get("CALENDLY_OPENAPI_TOKEN") or compat_api_key
+    explicit_openapi_key = os.environ.get("CALENDLY_OPENAPI_API_KEY")
+
+    flags: list[str] = []
+    if token:
+        flags += ["--token", token]
+    elif explicit_openapi_key:
+        flags += ["--api-key", explicit_openapi_key]
+    return flags
+
+
+def openapi_base(args: argparse.Namespace) -> list[str]:
+    # Always request json from generated CLI; wrapper handles final output formatting.
+    return [sys.executable, str(OPENAPI_CLI), "--output", "json", *auth_flags(args)]
+
+
+def event_uuid_from_event(event: dict[str, Any]) -> str | None:
+    uri = event.get("uri")
+    if isinstance(uri, str) and "/" in uri:
+        return uri.rsplit("/", 1)[-1]
+    return None
+
+
+def cmd_get_current_user(args: argparse.Namespace) -> int:
+    payload = run_json([*openapi_base(args), "users", "get-user-account"], timeout_ms=args.timeout)
+    emit_output(payload, args.output)
+    return 0
+
+
+def cmd_list_events(args: argparse.Namespace) -> int:
+    cmd = [*openapi_base(args), "scheduled-events", "get-events"]
+    if args.user_uri:
+        cmd += ["--user", args.user_uri]
+    if args.organization_uri:
+        cmd += ["--organization", args.organization_uri]
+    if args.status:
+        cmd += ["--status", args.status]
+    if args.max_start_time:
+        cmd += ["--max-start-time", args.max_start_time]
+    if args.min_start_time:
+        cmd += ["--min-start-time", args.min_start_time]
+    if args.count is not None:
+        cmd += ["--count", str(args.count)]
+    payload = run_json(cmd, timeout_ms=args.timeout)
+    emit_output(payload, args.output)
+    return 0
+
+
+def cmd_get_event(args: argparse.Namespace) -> int:
+    payload = run_json([*openapi_base(args), "scheduled-events", "get-uuid", "--uuid", args.event_uuid], timeout_ms=args.timeout)
+    emit_output(payload, args.output)
+    return 0
+
+
+def cmd_list_event_invitees(args: argparse.Namespace) -> int:
+    cmd = [*openapi_base(args), "scheduled-events", "get", "--uuid", args.event_uuid]
+    if args.status:
+        cmd += ["--status", args.status]
+    if args.email:
+        cmd += ["--email", args.email]
+    if args.count is not None:
+        cmd += ["--count", str(args.count)]
+    payload = run_json(cmd, timeout_ms=args.timeout)
+    emit_output(payload, args.output)
+    return 0
+
+
+def cmd_list_organization_memberships(args: argparse.Namespace) -> int:
+    cmd = [*openapi_base(args), "organizations", "get-memberships"]
+    if args.user_uri:
+        cmd += ["--user", args.user_uri]
+    if args.organization_uri:
+        cmd += ["--organization", args.organization_uri]
+    if args.email:
+        cmd += ["--email", args.email]
+    if args.count is not None:
+        cmd += ["--count", str(args.count)]
+    payload = run_json(cmd, timeout_ms=args.timeout)
+    emit_output(payload, args.output)
+    return 0
+
+
+def cmd_list_events_with_invitees(args: argparse.Namespace) -> int:
+    base_cmd = [*openapi_base(args), "scheduled-events", "get-events"]
+    if args.user_uri:
+        base_cmd += ["--user", args.user_uri]
+    if args.organization_uri:
+        base_cmd += ["--organization", args.organization_uri]
+    if args.status:
+        base_cmd += ["--status", args.status]
+    if args.max_start_time:
+        base_cmd += ["--max-start-time", args.max_start_time]
+    if args.min_start_time:
+        base_cmd += ["--min-start-time", args.min_start_time]
+    if args.count is not None:
+        base_cmd += ["--count", str(args.count)]
+
+    events_payload = run_json(base_cmd, timeout_ms=args.timeout)
+    events = events_payload.get("collection", []) if isinstance(events_payload, dict) else []
+
+    out_events = []
+    for event in events:
+        event_copy = dict(event)
+        ev_uuid = event_uuid_from_event(event_copy)
+        invitees = []
+        if ev_uuid:
+            invitees_cmd = [
+                *openapi_base(args),
+                "scheduled-events",
+                "get",
+                "--uuid",
+                ev_uuid,
+                "--count",
+                "100",
+            ]
+            invitees_payload = run_json(invitees_cmd, timeout_ms=args.timeout)
+            invitees = invitees_payload.get("collection", []) if isinstance(invitees_payload, dict) else []
+        event_copy["invitees"] = invitees
+        out_events.append(event_copy)
+
+    result = {
+        "collection": out_events,
+        "pagination": events_payload.get("pagination") if isinstance(events_payload, dict) else None,
+        "meta": {
+            "source": "openapi-compat",
+            "note": "Invitees assembled via N+1 API calls (one per event).",
+        },
+    }
+    emit_output(result, args.output)
+    return 0
+
+
+def cmd_cancel_event(args: argparse.Namespace) -> int:
+    # Cancellation isn't cleanly exposed in current generated OpenAPI command set.
+    # Delegate to legacy CLI for now to preserve behavior.
+    if not LEGACY_CLI.exists():
+        sys.stderr.write("Legacy CLI not found for cancel-event fallback.\n")
+        return 1
+
+    cmd = [
+        str(LEGACY_CLI),
+        "--output",
+        args.output,
+        "--timeout",
+        str(args.timeout),
+        "cancel-event",
+        "--event-uuid",
+        args.event_uuid,
+    ]
+    if args.reason:
+        cmd += ["--reason", args.reason]
+
+    env = dict(os.environ)
+    compat_api_key = args.api_key or env.get("CALENDLY_API_KEY")
+    compat_token = args.token or env.get("CALENDLY_TOKEN") or env.get("CALENDLY_OPENAPI_TOKEN")
+    if compat_token and "CALENDLY_API_KEY" not in env:
+        env["CALENDLY_API_KEY"] = compat_token
+    elif compat_api_key:
+        env["CALENDLY_API_KEY"] = compat_api_key
+
+    cp = run_cmd(cmd, timeout_ms=args.timeout, env=env)
+    if cp.stdout:
+        sys.stdout.write(cp.stdout)
+    if cp.stderr:
+        sys.stderr.write(cp.stderr)
+    return cp.returncode
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="Calendly OpenAPI compatibility wrapper")
+    p.add_argument("--api-key", help="Calendly API key (defaults to CALENDLY_API_KEY)")
+    p.add_argument("--token", help="Calendly bearer token")
+    p.add_argument("-o", "--output", choices=["json", "raw", "text", "markdown"], default="json")
+    p.add_argument("-t", "--timeout", type=int, default=30000, help="Call timeout in milliseconds")
+
+    sub = p.add_subparsers(dest="command", required=True)
+
+    c = sub.add_parser("get-current-user")
+    c.set_defaults(func=cmd_get_current_user)
+
+    c = sub.add_parser("list-events")
+    c.add_argument("--user-uri")
+    c.add_argument("--organization-uri")
+    c.add_argument("--status", choices=["active", "canceled"])
+    c.add_argument("--max-start-time")
+    c.add_argument("--min-start-time")
+    c.add_argument("--count", type=int)
+    c.set_defaults(func=cmd_list_events)
+
+    c = sub.add_parser("list-events-with-invitees")
+    c.add_argument("--user-uri")
+    c.add_argument("--organization-uri")
+    c.add_argument("--status", choices=["active", "canceled"])
+    c.add_argument("--max-start-time")
+    c.add_argument("--min-start-time")
+    c.add_argument("--count", type=int, default=20)
+    c.set_defaults(func=cmd_list_events_with_invitees)
+
+    c = sub.add_parser("get-event")
+    c.add_argument("--event-uuid", required=True)
+    c.set_defaults(func=cmd_get_event)
+
+    c = sub.add_parser("list-event-invitees")
+    c.add_argument("--event-uuid", required=True)
+    c.add_argument("--status", choices=["active", "canceled"])
+    c.add_argument("--email")
+    c.add_argument("--count", type=int)
+    c.set_defaults(func=cmd_list_event_invitees)
+
+    c = sub.add_parser("cancel-event")
+    c.add_argument("--event-uuid", required=True)
+    c.add_argument("--reason")
+    c.set_defaults(func=cmd_cancel_event)
+
+    c = sub.add_parser("list-organization-memberships")
+    c.add_argument("--user-uri")
+    c.add_argument("--organization-uri")
+    c.add_argument("--email")
+    c.add_argument("--count", type=int)
+    c.set_defaults(func=cmd_list_organization_memberships)
+
+    return p
+
+
+def main() -> int:
+    if not OPENAPI_CLI.exists():
+        sys.stderr.write(f"Generated OpenAPI CLI missing: {OPENAPI_CLI}\n")
+        return 1
+    parser = build_parser()
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -128,6 +128,44 @@ The v2.0 Scheduling API will add:
 
 This skill wraps the [calendly-mcp-server](https://github.com/meAmitPatil/calendly-mcp-server) MCP server via [mcporter](https://github.com/steipete/mcporter).
 
+### Experimental: OpenAPI-generated CLI lane (pinned)
+
+We now maintain a **parallel OpenAPI lane** for evaluation, generated with a **pinned local fix** of `openapi2cli`.
+
+- Pinned generator repo: `/home/art/projects/skills/shared/openapi2cli-upstream`
+- Pinned commit: `09f9b06c483cb7c26f571afd5516628237ff7839`
+- Generated output: `generated/openapi/calendly_openapi.py`
+- Compatibility wrapper: `./calendly-openapi-compat` (legacy command surface)
+
+Generate/re-generate:
+
+```bash
+./scripts/generate-openapi-cli.sh
+```
+
+Run parity report vs current production CLI:
+
+```bash
+./scripts/parity-check-openapi-vs-current.sh
+cat reports/openapi-parity.txt
+```
+
+Use compatibility wrapper (experimental):
+
+```bash
+./calendly-openapi-compat --help
+./calendly-openapi-compat list-events --user-uri "<USER_URI>" --min-start-time "2026-02-01T00:00:00Z"
+```
+
+Wrapper behavior:
+- preserves legacy command names for core workflows
+- reads `CALENDLY_API_KEY` (Calendly PAT) and forwards it as bearer auth to the generated OpenAPI CLI
+- supports global `-o/--output` and `-t/--timeout` flags
+- `list-events-with-invitees` is emulated via event list + per-event invitee fetches
+- `cancel-event` currently delegates to legacy CLI for exact behavior parity
+
+**Current decision:** keep `./calendly` (mcporter-based) as production default; compat wrapper is ready for experimental rollout.
+
 To regenerate the CLI (if the upstream MCP server updates):
 
 ```bash
