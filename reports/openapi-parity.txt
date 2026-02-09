@@ -1,0 +1,34 @@
+OpenAPI parity report
+Generated at: 2026-02-09T17:51:20Z
+
+Current CLI required commands:
+  [OK] get-current-user
+  [OK] list-events
+  [OK] list-events-with-invitees
+  [OK] get-event
+  [OK] cancel-event
+  [OK] list-event-invitees
+  [OK] list-organization-memberships
+
+Generated OpenAPI CLI expected equivalents:
+  [OK] users get-user-account
+  [OK] scheduled-events get-events
+  [OK] scheduled-events get-uuid
+  [OK] scheduled-events get
+  [OK] organizations get-memberships
+
+Compat wrapper command parity (legacy surface):
+  [OK] get-current-user
+  [OK] list-events
+  [OK] list-events-with-invitees
+  [OK] get-event
+  [OK] cancel-event
+  [OK] list-event-invitees
+  [OK] list-organization-memberships
+
+Compatibility notes:
+  - list-events-with-invitees is emulated via N+1 calls (event list + per-event invitees)
+  - cancel-event currently delegates to legacy CLI for behavior parity
+
+Structural parity check: PASS
+Default switch recommendation: READY_FOR_EXPERIMENTAL (use compat wrapper in non-critical flows first)
