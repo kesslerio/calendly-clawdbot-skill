@@ -159,6 +159,8 @@ Use compatibility wrapper (experimental):
 
 Wrapper behavior:
 - preserves legacy command names for core workflows
+- reads `CALENDLY_API_KEY` and forwards auth to the generated OpenAPI CLI
+- supports global `-o/--output` and `-t/--timeout` flags
 - `list-events-with-invitees` is emulated via event list + per-event invitee fetches
 - `cancel-event` currently delegates to legacy CLI for exact behavior parity
 
