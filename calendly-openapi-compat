@@ -21,9 +21,11 @@ OPENAPI_CLI = ROOT / "generated" / "openapi" / "calendly_openapi.py"
 LEGACY_CLI = ROOT / "calendly"
 
 
-def run_cmd(cmd: list[str], timeout_ms: int = 30000) -> subprocess.CompletedProcess[str]:
+def run_cmd(
+    cmd: list[str], timeout_ms: int = 30000, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout_ms / 1000)
+        return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout_ms / 1000, env=env)
     except subprocess.TimeoutExpired:
         sys.stderr.write(f"Command timed out after {timeout_ms}ms\n")
         raise SystemExit(124)
@@ -49,14 +51,17 @@ def emit_output(payload: Any, output: str) -> None:
 
 
 def auth_flags(args: argparse.Namespace) -> list[str]:
-    api_key = args.api_key or os.environ.get("CALENDLY_API_KEY") or os.environ.get("CALENDLY_OPENAPI_API_KEY")
-    token = args.token or os.environ.get("CALENDLY_TOKEN") or os.environ.get("CALENDLY_OPENAPI_TOKEN")
+    # Calendly PATs are bearer tokens in practice. Keep CALENDLY_API_KEY compatibility
+    # by forwarding it as --token to generated OpenAPI CLI.
+    compat_api_key = args.api_key or os.environ.get("CALENDLY_API_KEY")
+    token = args.token or os.environ.get("CALENDLY_TOKEN") or os.environ.get("CALENDLY_OPENAPI_TOKEN") or compat_api_key
+    explicit_openapi_key = os.environ.get("CALENDLY_OPENAPI_API_KEY")
 
     flags: list[str] = []
-    if api_key:
-        flags += ["--api-key", api_key]
     if token:
         flags += ["--token", token]
+    elif explicit_openapi_key:
+        flags += ["--api-key", explicit_openapi_key]
     return flags
 
 
@@ -201,7 +206,15 @@ def cmd_cancel_event(args: argparse.Namespace) -> int:
     if args.reason:
         cmd += ["--reason", args.reason]
 
-    cp = run_cmd(cmd, timeout_ms=args.timeout)
+    env = dict(os.environ)
+    compat_api_key = args.api_key or env.get("CALENDLY_API_KEY")
+    compat_token = args.token or env.get("CALENDLY_TOKEN") or env.get("CALENDLY_OPENAPI_TOKEN")
+    if compat_token and "CALENDLY_API_KEY" not in env:
+        env["CALENDLY_API_KEY"] = compat_token
+    elif compat_api_key:
+        env["CALENDLY_API_KEY"] = compat_api_key
+
+    cp = run_cmd(cmd, timeout_ms=args.timeout, env=env)
     if cp.stdout:
         sys.stdout.write(cp.stdout)
     if cp.stderr:
