@@ -45,15 +45,7 @@ if [[ $# -ge 2 && "$1" == "events" && "$2" == "list" ]]; then
     
     output=$("$CALENDLY_BIN" "${args[@]}" 2>&1)
     
-    # Apply limit client-side if specified
-    if [[ -n "$limit" && "$json_mode" == true ]]; then
-        output=$(echo "$output" | jq --argjson lim "$limit" 'if type == "array" then .[:$lim]
-             elif has("collection") then .collection = (.collection[:$lim])
-             elif has("data") then .data = (.data[:$lim])
-             else . end' 2>/dev/null || echo "$output")
-    fi
-    
-    # Filter by event type if specified
+    # Filter by event type first (before limit), so limit applies to matching results
     if [[ -n "$event_type" && "$json_mode" == true ]]; then
         # Handle both array responses and object responses with collection/data
         output=$(echo "$output" | jq --arg et "$event_type" \
@@ -65,6 +57,14 @@ if [[ $# -ge 2 && "$1" == "events" && "$2" == "list" ]]; then
         # Text mode - just grep
         echo "$output" | grep -i "$event_type" || true
         exit 0
+    fi
+    
+    # Apply limit client-side AFTER filtering (limit applies to filtered results)
+    if [[ -n "$limit" && "$json_mode" == true ]]; then
+        output=$(echo "$output" | jq --argjson lim "$limit" 'if type == "array" then .[:$lim]
+             elif has("collection") then .collection = (.collection[:$lim])
+             elif has("data") then .data = (.data[:$lim])
+             else . end' 2>/dev/null || echo "$output")
     fi
     
     echo "$output"
