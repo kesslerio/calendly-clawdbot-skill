@@ -37,13 +37,21 @@ if [[ $# -ge 2 && "$1" == "events" && "$2" == "list" ]]; then
         esac
     done
     
-    # Build command
-    args=("list-events" "--status" "active" "--count" "$limit")
+    # Build command (list-events doesn't support --count, handle limit client-side)
+    args=("list-events" "--status" "active")
     if [[ "$json_mode" == true ]]; then
         args+=("-o" "json")
     fi
     
     output=$("$CALENDLY_BIN" "${args[@]}" 2>&1)
+    
+    # Apply limit client-side if specified
+    if [[ -n "$limit" && "$json_mode" == true ]]; then
+        output=$(echo "$output" | jq --argjson lim "$limit" 'if type == "array" then .[:$lim]
+             elif has("collection") then .collection = (.collection[:$lim])
+             elif has("data") then .data = (.data[:$lim])
+             else . end' 2>/dev/null || echo "$output")
+    fi
     
     # Filter by event type if specified
     if [[ -n "$event_type" && "$json_mode" == true ]]; then
