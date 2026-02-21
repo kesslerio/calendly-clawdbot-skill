@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CALENDLY_BIN="$SCRIPT_DIR/../calendly"
 
 # Check if this is a legacy command pattern
-if [[ $# -ge 3 && "$1" == "events" && "$2" == "list" ]]; then
+if [[ $# -ge 2 && "$1" == "events" && "$2" == "list" ]]; then
     # Legacy: calendly events list --event-type "X" --limit N --json
     event_type=""
     limit="20"
@@ -47,8 +47,12 @@ if [[ $# -ge 3 && "$1" == "events" && "$2" == "list" ]]; then
     
     # Filter by event type if specified
     if [[ -n "$event_type" && "$json_mode" == true ]]; then
+        # Handle both array responses and object responses with collection/data
         output=$(echo "$output" | jq --arg et "$event_type" \
-            '[.[] | select(.name // .event.name // .event_type // "" | contains($et))]' 2>/dev/null || echo "$output")
+            'if type == "array" then [.[] | select(.name // .event.name // .event_type // "" | contains($et))] 
+             elif has("collection") then (.collection // [] | [.[] | select(.name // .event.name // .event_type // "" | contains($et))])
+             elif has("data") then (.data // [] | [.[] | select(.name // .event.name // .event_type // "" | contains($et))])
+             else . end' 2>/dev/null || echo "$output")
     elif [[ -n "$event_type" ]]; then
         # Text mode - just grep
         echo "$output" | grep -i "$event_type" || true
@@ -59,7 +63,7 @@ if [[ $# -ge 3 && "$1" == "events" && "$2" == "list" ]]; then
     exit 0
 fi
 
-if [[ $# -ge 3 && "$1" == "invitees" && "$2" == "list" ]]; then
+if [[ $# -ge 2 && "$1" == "invitees" && "$2" == "list" ]]; then
     # Legacy: calendly invitees list --event UUID --json
     event_uuid=""
     json_mode=false
